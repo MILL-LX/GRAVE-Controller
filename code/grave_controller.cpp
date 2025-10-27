@@ -1,9 +1,13 @@
 /*
- * CÓDIGO FINAL - CONTROLADOR GRAVE RTC COM MP3
- * * Este código configura um controlador de ativação de amplificador (Output Pin 7) e
- * um MP3 player (YX5300) baseado em períodos de tempo definidos via RTC.
- * A configuração de períodos e o volume do MP3 são geridos através de um
- * Servidor Web em modo Access Point (AP).
+ * Grave RTC Controller with MP3
+ * Code developed using Gemini AI
+ * Author: Mauricio Martins
+ * License: MIT
+ *
+ * This code sets up an amplifier activation controller (Output Pin 7) and
+ * an MP3 player (YX5300) based on time periods defined via RTC.
+ * The configuration of periods and MP3 volume is managed through a
+ * simple Web Server in Access Point (AP) mode.
  */
 
 #include <Arduino.h> 
@@ -14,37 +18,38 @@
 #include <WebServer.h>
 #include <EEPROM.h> 
 
-// --- NOVO: BIBLIOTECA DO MP3 PLAYER ---
+// --- MP3 PLAYER LIBRARY ---
 #include <YX5300_ESP32.h>
-// ------------------------------------
+// --------------------------
 
-// --- CONFIGURAÇÕES DE PINAGEM PARA O ATOMS3 ---
+// --- PINOUT CONFIGURATIONS FOR ATOMS3 ---
 const int I2C_SDA_PIN = 38; 
 const int I2C_SCL_PIN = 39; 
-const int OUTPUT_PIN = 7; // Pino a ser ativado pelo alarme (Amplificador)
-// ------------------------------------------
+const int OUTPUT_PIN = 7; // Pin to be activated by the alarm (Amplifier/Relay)
+// ----------------------------------------
 
-// --- CONFIGURAÇÕES DO MP3 PLAYER (YX5300) ---
-// *Certifique-se de que RX no MP3 vá para TX (6) no ESP32, e TX no MP3 vá para RX (5) no ESP32
-#define MP3_RX_PIN 5 // Conectado ao TX do módulo MP3
-#define MP3_TX_PIN 6 // Conectado ao RX do módulo MP3
-// A faixa 1 é usada para o arquivo 'grave.mp3', assumindo que é o primeiro arquivo na raiz do SD.
+// --- MP3 PLAYER (YX5300) CONFIGURATION ---
+// *Ensure RX on MP3 goes to TX (6) on ESP32, and TX on MP3 goes to RX (5) on ESP32
+#define MP3_RX_PIN 5 // Connected to the MP3 module's TX
+#define MP3_TX_PIN 6 // Connected to the MP3 module's RX
+// Track 1 is used for the file 'grave.mp3', assuming it's the first file in the root of the SD card.
 const uint8_t GRAVE_MP3_TRACK_NUM = 1; 
 // ------------------------------------------
 
-// --- CREDENCIAIS DO ACCESS POINT (IP Fixo) ---
-const char* ap_ssid = "your_ssid";
-const char* ap_password = "your_password";
+// --- ACCESS POINT CREDENTIALS (Fixed IP) ---
+const char* ap_ssid = "GRAVE";
+const char* ap_password = "GRAVERTC";
 const IPAddress AP_IP(192, 168, 4, 1);
 const IPAddress AP_GATEWAY(192, 168, 4, 1);
 const IPAddress AP_SUBNET(255, 255, 255, 0);
 // --------------------------------------------------
 
-// --- CONFIGURAÇÕES DE PERSISTÊNCIA (EEPROM) ---
+// --- PERSISTENCE CONFIGURATIONS (EEPROM) ---
 #define EEPROM_SIZE 512 
 const int CONFIG_ADDRESS = 0;
-#define MAX_PERIODS 3 // Mantendo o limite de 3 períodos conforme seu último código
+#define MAX_PERIODS 3 // Keeping the limit of 3 periods
 
+// Struct to hold individual alarm periods
 struct Period {
   int start_h = 0;
   int start_m = 0;
@@ -52,17 +57,18 @@ struct Period {
   int end_m = 0;
 };
 
+// Struct to hold all alarm configuration data
 struct AlarmData {
   int num_periods = 0; 
   Period periods[MAX_PERIODS]; 
-  int volume = 15; // Nível de volume (0-30). Padrão: 15 (meio)
-  int signature = 0xAABBCCDD;
+  int volume = 15; // Volume level (0-30). Default: 15 (medium)
+  int signature = 0xAABBCCDD; // Signature to validate EEPROM data
 };
 
 AlarmData alarmConfig; 
 // ------------------------------------------
 
-// Variáveis de controlo de tempo e RTC
+// Time control and RTC variables
 unsigned long previousMillis = 0;
 const long interval = 1000; 
 
@@ -71,46 +77,48 @@ rtc_time_type RTCtime;
 rtc_date_type RTCdate;
 WebServer server(80);
 
-// --- OBJETOS MP3 ---
+// --- MP3 OBJECTS ---
 YX5300_ESP32 mp3; 
 
 bool is_alarm_active = false; 
 char str_buffer[128];
 
-// --- GESTÃO DO LED DE STATUS ---
+// --- STATUS LED MANAGEMENT ---
+// Function to set the LED color of the AtomS3
 void setLEDColor(uint32_t color) { AtomS3.dis.drawpix(color); }
 
 
-// --- PERSISTÊNCIA DE DADOS (EEPROM) ---
+// --- DATA PERSISTENCE (EEPROM) ---
 void loadAlarmConfig() {
     EEPROM.get(CONFIG_ADDRESS, alarmConfig); 
     
+    // Check if EEPROM data is valid
     if (alarmConfig.signature != 0xAABBCCDD) {
-        Serial.println("[EEPROM] Dados inválidos/Primeira execucao. Usando defaults.");
+        Serial.println("[EEPROM] Invalid data/First run. Using defaults.");
         AlarmData default_config; 
         alarmConfig = default_config;
-        saveAlarmConfig(); 
+        saveAlarmConfig(); // Save defaults immediately
     }
     
-    // Garantir que o volume carregado está dentro dos limites
+    // Ensure the loaded volume is within limits
     alarmConfig.volume = constrain(alarmConfig.volume, 0, 30);
     
-    Serial.printf("[EEPROM] %d períodos e volume %d carregados.\n", alarmConfig.num_periods, alarmConfig.volume);
+    Serial.printf("[EEPROM] %d periods and volume %d loaded.\n", alarmConfig.num_periods, alarmConfig.volume);
 }
 
 void saveAlarmConfig() {
     EEPROM.put(CONFIG_ADDRESS, alarmConfig);
     if (EEPROM.commit()) {
-        Serial.println("[EEPROM] Configuração do alarme salva com sucesso.");
+        Serial.println("[EEPROM] Alarm configuration saved successfully.");
     } else {
-        Serial.println("[EEPROM] ERRO ao salvar configuração.");
+        Serial.println("[EEPROM] ERROR saving configuration.");
     }
 }
 
 
-// --- Configuração do Modo AP (NTP Removido) ---
+// --- AP Mode Setup (NTP Removed) ---
 void setupAPMode() {
-    Serial.println("\n\n--- INICIANDO EM MODO ACCESS POINT (AP) EXCLUSIVO ---");
+    Serial.println("\n\n--- STARTING IN EXCLUSIVE ACCESS POINT (AP) MODE ---");
     
     WiFi.disconnect(true); 
     WiFi.mode(WIFI_AP);
@@ -119,32 +127,32 @@ void setupAPMode() {
     WiFi.softAP(ap_ssid, ap_password); 
 
     Serial.printf("SSID: %s\n", ap_ssid);
-    Serial.printf("IP Fixo: %s\n", AP_IP.toString().c_str());
+    Serial.printf("Fixed IP: %s\n", AP_IP.toString().c_str());
 
-    Serial.println("ATENÇÃO: A hora do RTC deve ser configurada manualmente via Web.");
+    Serial.println("ATTENTION: RTC time must be configured manually via Web.");
 }
 
 
-// --- LÓGICA DO ALARME E CONTROLE DE LED (VERDE/VERMELHO) ---
+// --- ALARM LOGIC AND LED CONTROL (GREEN/RED) ---
 void checkAlarmState() {
     int now_in_minutes = RTCtime.Hours * 60 + RTCtime.Minutes;
     bool should_be_active = false;
 
-    // Itera por todos os períodos configurados
+    // Iterate through all configured periods
     for (int i = 0; i < alarmConfig.num_periods; i++) {
         Period p = alarmConfig.periods[i];
         int start_in_minutes = p.start_h * 60 + p.start_m;
         int end_in_minutes = p.end_h * 60 + p.end_m;
 
-        // Lógica de ativação (incluindo períodos noturnos/overnight)
+        // Activation logic (including overnight periods)
         if (start_in_minutes < end_in_minutes) {
-            // Período no mesmo dia
+            // Period within the same day
             if (now_in_minutes >= start_in_minutes && now_in_minutes < end_in_minutes) {
                 should_be_active = true;
                 break; 
             }
         } else if (start_in_minutes > end_in_minutes) {
-            // Período noturno (passa pela meia-noite)
+            // Overnight period (passes midnight)
             if (now_in_minutes >= start_in_minutes || now_in_minutes < end_in_minutes) {
                 should_be_active = true;
                 break; 
@@ -154,50 +162,51 @@ void checkAlarmState() {
     
     
     if (should_be_active && !is_alarm_active) {
-        // Alarme acaba de ATIVAR
-        digitalWrite(OUTPUT_PIN, LOW); // Ativa pino de saída
+        // Alarm is just ACTIVATING
+        digitalWrite(OUTPUT_PIN, LOW); // Activates output pin (Relay ON)
         is_alarm_active = true;
-        setLEDColor(0x00FF00); // VERDE: ATIVO
-        Serial.printf("[ALARME] ATIVADO: %02d:%02d (LED VERDE / G7 LOW)\n", RTCtime.Hours, RTCtime.Minutes);
+        setLEDColor(0x00FF00); // GREEN: ACTIVE
+        Serial.printf("[ALARM] ACTIVATED: %02d:%02d (GREEN LED / G7 LOW)\n", RTCtime.Hours, RTCtime.Minutes);
         
-        // Faz playback do ficheiro 'grave.mp3' (faixa 1) EM LOOP
-        Serial.println("[MP3] Tocar 'grave.mp3' (Faixa 1) em LOOP.");
+        // Plays the file 'grave.mp3' (track 1) in LOOP
+        Serial.println("[MP3] Playing 'grave.mp3' (Track 1) in LOOP.");
         mp3.playTrackInLoop(GRAVE_MP3_TRACK_NUM); 
         
     } else if (!should_be_active && is_alarm_active) {
-        // Alarme acaba de DESATIVAR
-        digitalWrite(OUTPUT_PIN, HIGH); // Desativa pino de saída
+        // Alarm is just DEACTIVATING
+        digitalWrite(OUTPUT_PIN, HIGH); // Deactivates output pin (Relay OFF)
         is_alarm_active = false;
-        setLEDColor(0xFF0000); // VERMELHO: INATIVO
-        Serial.printf("[ALARME] DESATIVADO: %02d:%02d (LED VERMELHO / G7 HIGH)\n", RTCtime.Hours, RTCtime.Minutes);
+        setLEDColor(0xFF0000); // RED: INACTIVE
+        Serial.printf("[ALARM] DEACTIVATED: %02d:%02d (RED LED / G7 HIGH)\n", RTCtime.Hours, RTCtime.Minutes);
         
-        // Para o playback
-        Serial.println("[MP3] Parar playback.");
+        // Stops playback
+        Serial.println("[MP3] Stopping playback.");
         mp3.stop();
         
     } else if (should_be_active) {
-        // Mantém VERDE
+        // Keeps GREEN
         setLEDColor(0x00FF00); 
     } else {
-        // Mantém VERMELHO (Estado Inativo)
+        // Keeps RED (Inactive State)
         setLEDColor(0xFF0000); 
     }
 }
 
 
-// --- Funções do Servidor Web (Handlers) ---
+// --- Web Server Functions (Handlers) ---
 
 void handleRoot() {
-    // HTML otimizado (CSS e Estrutura)
+    // HTML optimized (CSS and Structure) - Strings remain in Portuguese for UI consistency
     String html = "<!DOCTYPE html><html><head><title>GRAVE Controller</title><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1'><style>body { font-family: sans-serif; background: #f0f0f0; max-width: 400px; margin: 0 auto; padding: 10px; }div { background: #fff; border-radius: 5px; padding: 20px; margin-bottom: 10px; }h1 { color: #333; } p { color: #555; }form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }label { font-weight: bold; }input[type='number'], select { width: 90%; padding: 5px; }input[type='submit'] { grid-column: 1 / -1; padding: 10px; background: #007bff; color: white; border: none; border-radius: 5px; font-size: 1em; } h3 { grid-column: 1 / -1; margin-top: 5px; margin-bottom: 5px; border-bottom: 1px solid #ccc; padding-bottom: 5px; }</style></head><body><h1>GRAVE Controller</h1>";
     
     
-    // Div: Estado Atual e Informação do AP
+    // Div: Current Status and AP Information
     html += "<div><h2>Estado Atual</h2>";
     
     RTC.getTime(&RTCtime); 
     RTC.getDate(&RTCdate);
     
+    // Display current RTC time/date in Portuguese
     sprintf(str_buffer, "<p>Hora RTC: <strong>%02d:%02d:%02d</strong> (Hora Local)</strong></p>",
              RTCtime.Hours, RTCtime.Minutes, RTCtime.Seconds);
     html += str_buffer;
@@ -205,14 +214,14 @@ void handleRoot() {
              RTCdate.Date, RTCdate.Month, RTCdate.Year);
     html += str_buffer;
     
-    // Exibe o estado do Alarme (implícito pelo LED)
+    // Display Amplifier/MP3 state in Portuguese
     sprintf(str_buffer, "<p>AMP / MP3 Player: <strong>%s</strong> (Volume: %d)</p>",
              is_alarm_active ? "ON / Play" : "OFF / Stop", alarmConfig.volume);
     html += str_buffer;
     
     html += "</div>";
 
-    // --- NOVO DIV: CONTROLE DE VOLUME MP3 ---
+    // --- NEW DIV: MP3 VOLUME CONTROL ---
     html += "<div><h2>Controle de Volume do MP3</h2>";
     html += "<p>Ajuste o volume (0-30). O volume atual é: <strong>" + String(alarmConfig.volume) + "</strong>.</p>";
     html += "<form action='/setvolume' method='POST' style='grid-template-columns: 1fr;'>";
@@ -224,7 +233,7 @@ void handleRoot() {
     // ----------------------------------------
 
 
-    // Div: Definir Alarme (para múltiplos períodos)
+    // Div: Define Alarm (for multiple periods)
     html += "<div><h2>Definir Períodos de Ativação</h2>";
     
     if (alarmConfig.num_periods == 0) {
@@ -244,7 +253,7 @@ void handleRoot() {
     
     html += "<form action='/set' method='POST'>";
     
-    // Loop para gerar os 3 conjuntos de campos (MAX_PERIODS = 3)
+    // Loop to generate the 3 field sets (MAX_PERIODS = 3)
     for (int i = 0; i < MAX_PERIODS; i++) {
         Period p = (i < alarmConfig.num_periods) ? alarmConfig.periods[i] : Period();
         
@@ -270,7 +279,7 @@ void handleRoot() {
 
     html += "</form></div>";
 
-    // --- NOVO DIV: SINCRONIZAÇÃO MANUAL DO RTC ---
+    // --- NEW DIV: MANUAL RTC SYNCHRONIZATION ---
     html += "<div><h2>Ajustar Hora Local</h2>";
     html += "<form action='/settime' method='POST' style='grid-template-columns: 1fr 1fr 1fr; gap: 10px;'>";
     
@@ -302,9 +311,10 @@ void handleRoot() {
 }
 
 void handleSet() {
+    // Handler to process the alarm period form submission
     if (server.method() == HTTP_POST) {
         
-        AlarmData newConfig = alarmConfig; // Copia a configuração atual, incluindo o volume
+        AlarmData newConfig = alarmConfig; // Copy current config, including volume
         int periods_count = 0;
 
         for (int i = 0; i < MAX_PERIODS; i++) {
@@ -319,11 +329,13 @@ void handleSet() {
             int end_h = server.arg(end_h_name).toInt();
             int end_m = server.arg(end_m_name).toInt();
 
+            // Constraint checks
             start_h = constrain(start_h, 0, 23);
             start_m = constrain(start_m, 0, 59);
             end_h = constrain(end_h, 0, 23);
             end_m = constrain(end_m, 0, 59);
 
+            // Only save if any time component is non-zero
             if (start_h != 0 || start_m != 0 || end_h != 0 || end_m != 0) {
                 newConfig.periods[periods_count].start_h = start_h;
                 newConfig.periods[periods_count].start_m = start_m;
@@ -337,16 +349,16 @@ void handleSet() {
         alarmConfig = newConfig; 
         saveAlarmConfig();       
 
-        Serial.printf("[Servidor Web] %d períodos ativos definidos.\n", alarmConfig.num_periods);
+        Serial.printf("[Web Server] %d active periods defined.\n", alarmConfig.num_periods);
         
         server.sendHeader("Location", "/", true);
         server.send(302, "text/plain", "");
     } else {
-        server.send(405, "text/plain", "Metodo nao permitido");
+        server.send(405, "text/plain", "Method not allowed");
     }
 }
 
-// --- NOVO HANDLER PARA DEFINIR O VOLUME ---
+// --- HANDLER TO SET VOLUME ---
 void handleSetVolume() {
     if (server.method() == HTTP_POST) {
         
@@ -357,57 +369,58 @@ void handleSetVolume() {
             alarmConfig.volume = new_volume;
             mp3.setVolume(new_volume);
             saveAlarmConfig(); 
-            Serial.printf("[Servidor Web] Volume MP3 ajustado para: %d\n", new_volume);
+            Serial.printf("[Web Server] MP3 volume adjusted to: %d\n", new_volume);
         }
 
         server.sendHeader("Location", "/", true);
         server.send(302, "text/plain", "");
     } else {
-        server.send(405, "text/plain", "Metodo nao permitido");
+        server.send(405, "text/plain", "Method not allowed");
     }
 }
 // ----------------------------------------
 
 void handleSetTime() {
+    // Handler to set the RTC time and date manually
     if (server.method() == HTTP_POST) {
         
-        // Obter e validar a Hora
+        // Get and validate Time
         int new_h = constrain(server.arg("h").toInt(), 0, 23);
         int new_m = constrain(server.arg("m").toInt(), 0, 59);
         int new_s = constrain(server.arg("s").toInt(), 0, 59);
         
-        // Obter e validar a Data
+        // Get and validate Date
         int new_d = constrain(server.arg("d").toInt(), 1, 31);
         int new_mon = constrain(server.arg("mon").toInt(), 1, 12);
         int new_y = constrain(server.arg("y").toInt(), 2024, 2100); 
 
-        // Definir a Hora no RTC
+        // Set Time in RTC
         RTCtime.Hours = new_h;
         RTCtime.Minutes = new_m;
         RTCtime.Seconds = new_s;
         RTC.setTime(&RTCtime);
         
-        // Definir a Data no RTC
+        // Set Date in RTC
         RTCdate.Date = new_d;
         RTCdate.Month = new_mon;
         RTCdate.Year = new_y;
         RTC.setDate(&RTCdate);
         
-        Serial.printf("[Servidor Web] RTC Ajustado para: %02d/%02d/%04d %02d:%02d:%02d\n",
+        Serial.printf("[Web Server] RTC Adjusted to: %02d/%02d/%04d %02d:%02d:%02d\n",
                       new_d, new_mon, new_y, new_h, new_m, new_s);
 
         server.sendHeader("Location", "/", true);
         server.send(302, "text/plain", "");
     } else {
-        server.send(405, "text/plain", "Metodo nao permitido");
+        server.send(405, "text/plain", "Method not allowed");
     }
 }
 
 void handleNotFound() {
-    server.send(404, "text/plain", "404: Nao encontrado");
+    server.send(404, "text/plain", "404: Not found");
 }
 
-// --- Funções Principais (Setup e Loop) ---
+// --- Main Functions (Setup and Loop) ---
 
 void setup() {
     Serial.begin(115200); 
@@ -417,46 +430,78 @@ void setup() {
     
     Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
     
-    Serial.println("M5Atom S3 RTC Controller a iniciar...");
+    Serial.println("M5Atom S3 RTC Controller starting...");
     RTC.begin(); 
     
-    // Configuração do MP3 Player
+    // MP3 Player Configuration
     mp3 = YX5300_ESP32(Serial1, MP3_RX_PIN, MP3_TX_PIN);
     mp3.enableDebugging();
     
-    // Define o pino como saída e o estado inicial como INATIVO (HIGH)
+    // Define the pin as output and the initial state as INACTIVE (HIGH)
     pinMode(OUTPUT_PIN, OUTPUT);
     digitalWrite(OUTPUT_PIN, HIGH); 
 
     if (!EEPROM.begin(EEPROM_SIZE)) {
-        Serial.println("ERRO FATAL: Falha ao inicializar EEPROM.");
+        Serial.println("FATAL ERROR: Failed to initialize EEPROM.");
         while(true); 
     }
     
     loadAlarmConfig();
     
-    // NOVO: Define o volume inicial do MP3 Player
+    // NEW: Set the initial MP3 Player volume
     mp3.setVolume(alarmConfig.volume);
-    Serial.printf("[MP3] Volume inicial definido para: %d\n", alarmConfig.volume);
+    Serial.printf("[MP3] Initial MP3 volume set to: %d\n", alarmConfig.volume);
+    
+    
+    // ------------------------------------------------------------------
+    // --- INITIALIZATION TEST BLOCK (10 SECONDS) ---
+    // ------------------------------------------------------------------
+    Serial.println("\n[TEST] STARTING 10-SECOND TEST (Amplifier/MP3)...");
+    
+    // 1. Activate Amplifier (Relay ON)
+    digitalWrite(OUTPUT_PIN, LOW); 
+    
+    // 2. Play MP3 File (Track 1 - grave.mp3)
+    mp3.playTrackInLoop(GRAVE_MP3_TRACK_NUM); 
+    
+    // 3. BLUE LED to indicate TEST MODE
+    setLEDColor(0x0000FF); 
+    AtomS3.dis.show(); // FORCES the LED update before blocking delay
+    
+    // 4. Wait for 10 seconds (This is a blocking operation)
+    delay(10000); 
+    
+    // 5. Deactivate Amplifier (Relay OFF)
+    digitalWrite(OUTPUT_PIN, HIGH); 
+    
+    // 6. Stop MP3
+    mp3.stop(); 
+    
+    // 7. Clear LED (set to OFF) after the test
+    setLEDColor(0x000000); 
+    AtomS3.dis.show(); // FORCES the LED update before proceeding
+    
+    Serial.println("[TEST] 10-second test concluded. Entering Normal Operation mode.");
+    // ------------------------------------------------------------------
 
     setupAPMode(); 
     
-    // --- ROTAS DO SERVIDOR WEB ---
+    // --- WEB SERVER ROUTES ---
     server.on("/", HTTP_GET, handleRoot);     
     server.on("/set", HTTP_POST, handleSet);   
     server.on("/settime", HTTP_POST, handleSetTime); 
-    server.on("/setvolume", HTTP_POST, handleSetVolume); // NOVA ROTA PARA VOLUME
+    server.on("/setvolume", HTTP_POST, handleSetVolume); 
     server.onNotFound(handleNotFound);        
     server.begin();
     
-    Serial.println("Servidor Web iniciado em Modo AP.");
-    Serial.printf("Acesse http://%s\n", AP_IP.toString().c_str());
+    Serial.println("Web Server started in AP Mode.");
+    Serial.printf("Access http://%s\n", AP_IP.toString().c_str());
     
     RTC.getTime(&RTCtime);
     RTC.getDate(&RTCdate);
     
-    // Força a verificação do estado do alarme para definir a cor inicial correta (Verde ou Vermelho)
-    checkAlarmState(); 
+    // The initial alarm state check is now handled by the loop() function
+    // checkAlarmState(); 
 }
 
 void loop() {
@@ -469,6 +514,7 @@ void loop() {
         
         AtomS3.update(); 
         
+        // Get current time from RTC and check alarm state
         RTC.getTime(&RTCtime);
         RTC.getDate(&RTCdate); 
         checkAlarmState(); 

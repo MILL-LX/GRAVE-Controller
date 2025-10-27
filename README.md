@@ -6,13 +6,13 @@ This project implements a programmable time controller, based on the **M5Stack**
 
 * **Self-Test at Boot:** Upon power-up, the device initiates a 10-second self-test. The amplifier relay is activated (LOW state on Pin 7), Track 1 audio plays in a loop, and the ATOM S3 LED turns Blue (0x0000FF), confirming the functionality of the audio and amplification system.
 * **Precise Time Control:** Uses a **Real-Time Clock (RTC)** for precise system activation during programmed periods.  
-* **Access Point (AP) Mode:** Creates a fixed local Wi-Fi network (SSID: GRAVE, Password: GRAVERTC) for direct access to the controller.  
+* **Access Point (AP) Mode:** Creates a fixed local Wi-Fi network for direct access to the controller.  
 * **Web Interface (HTTP Server):** Allows remote configuration of:  
   * Three daily activation periods.  
   * Manual adjustment of the RTC time and date.  
   * **MP3 Volume Control** in real-time (scale 0 to 30).  
 * **Persistence:** Alarm and volume settings are saved in **EEPROM** memory, remaining preserved after power cycling.  
-* **Audio Control:** Starts and stops *loop* playback of the audio file (Track 1 \- grave.mp3 expected) on the MP3 module's SD card.
+* **Audio Control:** Starts and stops *loop* playback of the audio file on the MP3 module's SD card.
 
 ## **🛠️ Hardware Used**
 

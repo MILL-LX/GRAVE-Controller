@@ -37,8 +37,8 @@ const uint8_t GRAVE_MP3_TRACK_NUM = 1;
 // ------------------------------------------
 
 // --- ACCESS POINT CREDENTIALS (Fixed IP) ---
-const char* ap_ssid = "GRAVE";
-const char* ap_password = "GRAVERTC";
+const char* ap_ssid = "your_ssid";
+const char* ap_password = "your_pass";
 const IPAddress AP_IP(192, 168, 4, 1);
 const IPAddress AP_GATEWAY(192, 168, 4, 1);
 const IPAddress AP_SUBNET(255, 255, 255, 0);

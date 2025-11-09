@@ -2,6 +2,8 @@
 
 This project implements a programmable time controller, based on the **M5Stack** ecosystem, to manage the activation of an amplifier (via relay) and audio playback via an MP3 module. The configuration of time periods and audio volume is managed through a simple Web interface.
 
+This project was developed with the help of Gemini AI under the guidance of Mauricio Martins. @the-spaceinvader
+
 ## **Key Features**
 
 * **Self-Test at Boot:** Upon power-up, the device initiates a 10-second self-test. The amplifier relay is activated (LOW state on Pin 7), Track 1 audio plays in a loop, and the ATOM S3 LED turns Blue, confirming the functionality of the audio and amplification system.
